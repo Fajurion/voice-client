@@ -1,6 +1,6 @@
-use std::{time::Duration, thread};
+use std::{time::Duration, thread, sync::{Mutex, Arc}};
 
-use cpal::{traits::{HostTrait, DeviceTrait, StreamTrait}, StreamConfig};
+use cpal::{traits::{HostTrait, DeviceTrait, StreamTrait}, StreamConfig, Stream};
 use opus::Encoder;
 use rubato::{FftFixedOut, Resampler, FftFixedIn};
 
@@ -42,54 +42,15 @@ pub fn record_microphone() {
     ).unwrap();
 
     // Create buffer for overflowing samples
-    let mut overflow_buffer = Vec::<f32>::new();
+    let overflow_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let overflow_buffer_2 = overflow_buffer.clone();
 
-    let mut sample_vec = Vec::<f32>::new();
-
+    let mut sample_vec: Vec<f32> = Vec::<f32>::new();
     // Create a stream
     let stream = device.build_input_stream(
         &config.into(),
         move |data: &[f32], _: &_| {
-
-            // Cut down data and put rest into overflow buffer
-            let sample: &[f32];
-
-            let max_length = resampler.input_frames_next()*channels as usize;
-            if data.len() > max_length {
-                let (buffer, overflow) = data.split_at(max_length);
-                overflow_buffer.extend_from_slice(overflow);
-                sample = buffer;
-            } else {
-                sample = data;
-            }
-            // Convert into seperate channels
-            let channels = extract_channels(sample, channels as usize);
-
-            println!("{:?} channels: {:?}", channels.len(), data.len());
-            println!("samples in 0: {:?}", channels[0].len());
-            println!("samples in 1: {:?}", channels[1].len());
-
-            // Resample
-            let resampled = resampler.process(&channels, None).unwrap();
-            let sample = reverse_extract_channels_2(&resampled); 
-
-            // TODO: Save in large buffer and encode with opus every 20ms
-
-            // Encode the samples using Opus
-            /* 
-            let mut encoded = [0u8; 2048];
-            let len = match encoder.encode(&data, &mut encoded) {
-                Ok(len) => len,
-                Err(err) => panic!("error encoding: {}", err),
-            };
-            let encoded = &encoded[..len]; */
-
-            // Add all to sample_vec
-            sample_vec.extend_from_slice(&sample);
-
-            println!("samples: {:?}", &sample_vec.len());
-
-            // TODO: Do something
+            resample_data(data, &mut resampler, &overflow_buffer_2, &mut sample_vec, channels);
         },
         move |err| {
             eprintln!("an error occurred on stream: {}", err);
@@ -105,6 +66,48 @@ pub fn record_microphone() {
 
     stream.pause().unwrap();    
     
+}
+
+fn resample_data(data: &[f32], resampler: &mut FftFixedOut<f64>, overflow_buffer_p: &Arc<Mutex<Vec<f32>>>, sample_vec: &mut Vec<f32>, channels: u16) {
+
+    // Cut down to needed size and add to overflow buffer
+    let mut max_length = resampler.input_frames_next()*channels as usize;
+    let mut overflow_buffer = overflow_buffer_p.lock().unwrap();
+    overflow_buffer.extend_from_slice(data);
+
+    while overflow_buffer.len() > max_length {
+
+        // Get data to resample from overflow
+        let buffer = if overflow_buffer.len() > max_length {
+            let buffer = overflow_buffer.drain(0..max_length).collect::<Vec<f32>>();
+            buffer
+        } else {
+            return;
+        };
+        
+        // Extract channels
+        let extracted_channels = extract_channels(&buffer, channels as usize);
+
+        println!("{:?} channels: {:?}", extracted_channels.len(), data.len());
+        println!("samples in 0: {:?}/{:?}", extracted_channels[0].len(), max_length / 2);
+        println!("samples in 1: {:?}/{:?}", extracted_channels[1].len(), max_length / 2);
+        println!("overflow: {:?}", overflow_buffer.len());
+
+        // Resample and reverse extract
+        let resampled = resampler.process(&extracted_channels, None).unwrap();
+        let sample = reverse_extract_channels_2(&resampled); 
+
+        // Add all to sample_vec
+        sample_vec.extend_from_slice(&sample);
+
+        // Prepare for next iteration
+        max_length = resampler.input_frames_next()*channels as usize;
+    }
+
+    println!("samples: {:?}", &sample_vec.len());
+
+    // TODO: Do something
+
 }
 
 fn extract_channels(data: &[f32], channels: usize) -> Vec<Vec<f64>> {
