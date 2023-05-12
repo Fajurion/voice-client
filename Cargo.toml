@@ -9,4 +9,5 @@ edition = "2021"
 [dependencies]
 cpal = "0.15.2"
 opus = "0.3.0"
+rodio = "0.17.1"
 rubato = "0.12.0"
