@@ -1,10 +1,11 @@
 use std::{time::Duration, thread, sync::{Mutex, Arc}};
 
 use cpal::{traits::{HostTrait, DeviceTrait, StreamTrait}, StreamConfig};
-use opus::{Channels, Application};
 use rubato::{FftFixedOut, Resampler};
 
-use crate::audio::{encode, decode, playback};
+use crate::audio::{encode};
+
+use super::playback;
 
 pub fn record() {
     
@@ -15,7 +16,7 @@ pub fn record() {
     // Create a stream config
     let default_config = device.default_input_config().expect("no stream config found");
     let sample_rate = default_config.sample_rate().0;
-    let channels = 1;
+    let channels = 1; // Stereo doesn't work at the moment (will fix in the future or never)
 
     // Create custom config with better buffer size
     let config = StreamConfig {
@@ -27,28 +28,30 @@ pub fn record() {
     let mut resampler = FftFixedOut::<f64>::new(
         sample_rate as usize,
         encode::SAMPLE_RATE as usize,
-        1920,
-        1920,
+        encode::FRAME_SIZE,
+        encode::FRAME_SIZE,
         channels as usize,
     ).unwrap();
 
-    // Create an encoder with 48 kHz sample rate, mono channel, and voice application
-    let mut encoder = opus::Encoder::new(48000, Channels::Mono, Application::Voip).unwrap();
-    encoder.set_bitrate(opus::Bitrate::Bits(128000)).unwrap(); // Set the bitrate to 32 kb/s
-
     // Create a decoder with the same parameters as the encoder
-    let mut decoder = opus::Decoder::new(48000, Channels::Mono).unwrap();
 
-    // Create buffer for overflowing samples
+    // Create buffer for overflowing samplesd
     let overflow_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let overflow_buffer_2 = overflow_buffer.clone();
+    let overflow_buffer_2: Arc<Mutex<Vec<f32>>> = overflow_buffer.clone();
 
-    let mut sample_vec: Vec<f32> = Vec::<f32>::new();
+    let sample_vec: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let encoding_vec = sample_vec.clone();
+    let recording_vec = sample_vec.clone();
+
+    let decoded_samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::<f32>::new()));
+
+    encode::encode_thread((channels as usize).clone(), encoding_vec, decoded_samples.clone());
+
     // Create a stream
     let stream = device.build_input_stream(
         &config.into(),
         move |data: &[f32], _: &_| {
-            resample_data(data, &mut resampler, &overflow_buffer_2, &mut sample_vec, channels, &mut encoder, &mut decoder);
+            resample_data(data, &mut resampler, &overflow_buffer_2, &recording_vec, channels);
         },
         move |err| {
             eprintln!("an error occurred on stream: {}", err);
@@ -64,20 +67,23 @@ pub fn record() {
 
     stream.pause().unwrap();
 
+    // Play the audio
+    playback::play_audio(decoded_samples.lock().unwrap().clone(), channels as usize);
+
 }
 
 fn resample_data(
     data: &[f32], 
     resampler: &mut FftFixedOut<f64>, 
     overflow_buffer_p: &Arc<Mutex<Vec<f32>>>, 
-    sample_vec: &mut Vec<f32>, 
+    sample_vec: &Arc<Mutex<Vec<f32>>>, 
     channels: u16,
-    encoder: &mut opus::Encoder,
-    decoder: &mut opus::Decoder,
 ) {
 
     // Cut down to needed size and add to overflow buffer
     let mut max_length = resampler.input_frames_next()*channels as usize;
+    println!("data: {}", data.len());
+    println!("max_length: {}", max_length);
     let mut overflow_buffer = overflow_buffer_p.lock().unwrap();
     overflow_buffer.extend_from_slice(data);
 
@@ -94,43 +100,25 @@ fn resample_data(
         // Extract channels
         let extracted_channels = extract_channels(&buffer, channels as usize);
 
-        println!("{:?} channels: {:?}", extracted_channels.len(), data.len());
-        println!("samples in 0: {:?}/{:?}", extracted_channels[0].len(), max_length / 2);
-        if channels == 2 {
-            println!("samples in 1: {:?}/{:?}", extracted_channels[1].len(), max_length / 2);
-        }
-        println!("overflow: {:?}", overflow_buffer.len());
-
         // Resample and reverse extract
         let resampled = resampler.process(&extracted_channels, None).unwrap();
-        let sample = reverse_extract_channels_2(&resampled);
-        let len = sample.len();
+        let sample = reverse_extract_channels(&resampled);
 
         // Add all to sample_vec
-        //sample_vec.extend_from_slice(&sample);
+        println!("sample: {:?}", sample.len());
+        sample_vec.lock().unwrap().extend_from_slice(&sample);
 
         // Prepare for next iteration
         max_length = resampler.input_frames_next()*channels as usize;
 
-        println!("resampled: {:?}", sample.len());
-
+        /* OLD CODE
         // Encode with opus
-        let samples = encode::encode(sample, channels as usize, encoder);
+        let samples = encode::encode(sample, encoder);
 
-        println!("encoded: {:?}", samples.len());
+        println!("encoded: {:?}", samples.len()); 
 
         // Decode for testing
-        let decoded_samples = decode::decode(samples, channels as usize, len as usize, decoder);
-
-        sample_vec.extend_from_slice(&decoded_samples);
-    }
-
-    println!("samples: {:?}", &sample_vec.len());
-
-    // Play audio
-    if sample_vec.len() > 130000 {
-        playback::play_audio(sample_vec.clone(), channels as usize);
-        panic!("hi")
+        let decoded_samples = decode::decode(samples, len as usize, decoder); */
     }
 }
 
@@ -147,7 +135,7 @@ fn extract_channels(data: &[f32], channels: usize) -> Vec<Vec<f64>> {
 }
 
 // Thanks ChatGPT
-fn reverse_extract_channels_2(channels_data: &[Vec<f64>]) -> Vec<f32> {
+fn reverse_extract_channels(channels_data: &[Vec<f64>]) -> Vec<f32> {
     let channel_size = channels_data.len();
     let num_samples = channels_data[0].len();
     let mut interleaved_samples = Vec::with_capacity(num_samples * channel_size);

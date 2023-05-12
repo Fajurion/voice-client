@@ -1,6 +1,6 @@
 mod audio;
 
-fn main() {    
+fn main() {   
 
     audio::microphone::record();
 }

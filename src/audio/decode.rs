@@ -1,4 +1,4 @@
-pub fn decode(samples: Vec<u8>, channels: usize, buffer_size: usize, decoder: &mut opus::Decoder) -> Vec<f32> {
+pub fn decode(samples: Vec<u8>, buffer_size: usize, decoder: &mut opus::Decoder) -> Vec<f32> {
 
     let mut output: Vec<f32> = vec![0f32; buffer_size];
 
