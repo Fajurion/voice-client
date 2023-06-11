@@ -1,6 +1,12 @@
+mod connection;
 mod audio;
+mod util;
+
+mod connect;
 
 fn main() {   
 
-    audio::microphone::record();
+    connect::connect();
+
+    //audio::microphone::record();
 }
