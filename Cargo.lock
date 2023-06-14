@@ -1147,6 +1147,7 @@ dependencies = [
  "aes-gcm",
  "base64",
  "cpal",
+ "once_cell",
  "opus",
  "rand",
  "rodio",
