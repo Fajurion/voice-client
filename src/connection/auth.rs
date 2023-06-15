@@ -40,6 +40,10 @@ pub fn auth_packet(id: &str, token: &str, secret: &str, room: &str) -> Vec<u8> {
     format!("{}:{}:{}", id, room, encoded_secret).into_bytes()
 }
 
+pub fn confirm_packet() -> Vec<u8> {
+    encrypted_packet(&mut "c:c".as_bytes().to_vec())
+}
+
 pub fn get_auth_prefix() -> PrefixKind {
     PrefixKind::Client
 }
