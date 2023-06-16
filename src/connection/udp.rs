@@ -1,12 +1,43 @@
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 use std::{io, thread};
 use std::net::UdpSocket;
 
+use once_cell::sync::Lazy;
+use rand::Rng;
+
+use crate::audio;
 use crate::connection::receiver;
 use crate::{connection::{auth, self}, util};
 
+static SEND_SENDER: Lazy<Mutex<Sender<Vec<u8>>>> = Lazy::new(|| {
+    let (sender, _) = mpsc::channel();
+    Mutex::new(sender)
+});
+
+static SEND_RECEIVER: Lazy<Mutex<Receiver<Vec<u8>>>> = Lazy::new(|| {
+    let (_, receiver) = mpsc::channel();
+    Mutex::new(receiver)
+});
+
+pub fn send(data: Vec<u8>) {
+    SEND_SENDER.lock().expect("channel broken").send(data).expect("sending broken");
+}
+
 pub fn connect(address: &str) {
-    connect_recursive(address, 0)
+
+    // Sending channel
+    let (sender, receiver) = mpsc::channel();
+    let mut actual_sender = SEND_SENDER.lock().unwrap();
+    *actual_sender = sender;
+    let mut actual_receiver = SEND_RECEIVER.lock().unwrap();
+    *actual_receiver = receiver;
+
+    drop(actual_sender);
+    drop(actual_receiver);
+
+    connect_recursive(address, 0);
 }
 
 fn connect_recursive(address: &str, tries: u8) {
@@ -17,7 +48,7 @@ fn connect_recursive(address: &str, tries: u8) {
     }
 
     // Bind to a local address
-    let socket = match UdpSocket::bind("localhost:3422") {
+    let socket = match UdpSocket::bind(format!("localhost:{}", rand::thread_rng().gen_range(3000..4000))) {
         Ok(s) => s,
         Err(_) => {
             println!("Could not bind socket");
@@ -85,7 +116,6 @@ fn connect_recursive(address: &str, tries: u8) {
         let decrypted = util::crypto::decrypt(&auth::get_encryption_key(), &buf[0..size]);
         let string = String::from_utf8_lossy(&decrypted);
 
-
         if string == input {
             println!("Authenticated");
             authenticated = true;
@@ -107,6 +137,10 @@ fn connect_recursive(address: &str, tries: u8) {
 
     // Start threads
     auth::refresh_thread(&socket);
+    send_thread(socket.try_clone().expect("Could not clone socket"));
+    audio::decode::decode_play_thread();
+
+    auth::set_connection(true);
 
     // Listen for udp traffic
     let mut buf: [u8; 8192] = [0u8; 8192];
@@ -119,4 +153,22 @@ fn connect_recursive(address: &str, tries: u8) {
         }
     }    
 
+}
+
+// Starts a thread that sends data from the sender channel
+fn send_thread(socket: UdpSocket) {
+
+    thread::spawn(move || {
+        loop {
+            let data = SEND_RECEIVER.lock().expect("brokey").recv().expect("Packet sending channel broke");
+
+            match socket.send(&data) {
+                Ok(_) => {}
+                Err(_) => {
+                    println!("Could not send"); 
+                    return;
+                }
+            }
+        }
+    });
 }

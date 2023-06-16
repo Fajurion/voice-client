@@ -8,6 +8,7 @@ use crate::util;
 
 use super::PrefixKind;
 
+static CONNECTION: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
 static ENCRYPTION_KEY: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![])); 
 
 pub fn set_encryption_key(key: Vec<u8>) {
@@ -18,6 +19,16 @@ pub fn set_encryption_key(key: Vec<u8>) {
 pub fn get_encryption_key() -> Vec<u8> {
     let encryption_key = ENCRYPTION_KEY.lock().unwrap();
     encryption_key.clone()
+}
+
+pub fn set_connection(connected: bool) {
+    let mut connection = CONNECTION.lock().unwrap();
+    *connection = connected;
+}
+
+pub fn get_connection() -> bool {
+    let connection = CONNECTION.lock().unwrap();
+    *connection
 }
 
 pub fn encrypted_packet(data: &mut Vec<u8>) -> Vec<u8> {

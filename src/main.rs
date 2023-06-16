@@ -5,11 +5,11 @@ pub mod util;
 static TESTING: bool = true;
 static TESTING_ADDRESS: &str = "localhost:3011";
 
-fn main() {   
+fn main() {  
+
+    audio::microphone::record();
 
     if TESTING {
         connection::udp::connect(TESTING_ADDRESS);
     }
-
-    //audio::microphone::record();
 }

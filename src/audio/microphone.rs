@@ -1,89 +1,77 @@
-use std::{time::Duration, thread, sync::{Mutex, Arc}};
+use std::{sync::{Mutex, Arc}, thread, time::Duration};
 
 use cpal::{traits::{HostTrait, DeviceTrait, StreamTrait}, StreamConfig};
 use rubato::{FftFixedOut, Resampler};
 
 use crate::audio::{encode};
 
-use super::playback;
-
 pub fn record() {
     
-    // Get a cpal host
-    let host = cpal::default_host(); // Current host on computer
-    let device = host.default_input_device().expect("no input device available"); // Current device
+    thread::spawn(|| {
 
-    // Create a stream config
-    let default_config = device.default_input_config().expect("no stream config found");
-    let sample_rate = default_config.sample_rate().0;
-    let channels = 1; // Stereo doesn't work at the moment (will fix in the future or never)
+        // Get a cpal host
+        let host = cpal::default_host(); // Current host on computer
+        let device = host.default_input_device().expect("no input device available"); // Current device
 
-    // Create custom config with better buffer size
-    let config = StreamConfig {
-        channels: channels,
-        sample_rate: cpal::SampleRate(sample_rate),
-        buffer_size: cpal::BufferSize::Fixed(4096),
-    };
-    // Create a resampler
-    let mut resampler = FftFixedOut::<f64>::new(
-        sample_rate as usize,
-        encode::SAMPLE_RATE as usize,
-        encode::FRAME_SIZE,
-        encode::FRAME_SIZE,
-        channels as usize,
-    ).unwrap();
+        // Create a stream config
+        let default_config = device.default_input_config().expect("no stream config found");
+        let sample_rate = default_config.sample_rate().0;
+        let channels = 1; // Stereo doesn't work at the moment (will fix in the future or never)
 
-    // Create a decoder with the same parameters as the encoder
+        // Create custom config with better buffer size
+        let config = StreamConfig {
+            channels: channels,
+            sample_rate: cpal::SampleRate(sample_rate),
+            buffer_size: cpal::BufferSize::Fixed(4096),
+        };
+        // Create a resampler
+        let mut resampler = FftFixedOut::<f64>::new(
+            sample_rate as usize,
+            encode::SAMPLE_RATE as usize,
+            encode::FRAME_SIZE,
+            encode::FRAME_SIZE,
+            channels as usize,
+        ).unwrap();
 
-    // Create buffer for overflowing samplesd
-    let overflow_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let overflow_buffer_2: Arc<Mutex<Vec<f32>>> = overflow_buffer.clone();
+        // Create buffer for overflowing samplesd
+        let overflow_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let overflow_buffer_2: Arc<Mutex<Vec<f32>>> = overflow_buffer.clone();
 
-    let sample_vec: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let encoding_vec = sample_vec.clone();
-    let recording_vec = sample_vec.clone();
+        // Start encoding: Arc<Mutex<Vec<f32>>> thread
+        encode::encode_thread((channels as usize).clone());
 
-    let decoded_samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::<f32>::new()));
+        // Create a stream
+        let stream = device.build_input_stream(
+            &config.into(),
+            move |data: &[f32], _: &_| {
+                resample_data(data, &mut resampler, &overflow_buffer_2, channels);
+            },
+            move |err| {
+                eprintln!("an error occurred on stream: {}", err);
+            },
+            None,
+        ).unwrap();
 
-    encode::encode_thread((channels as usize).clone(), encoding_vec, decoded_samples.clone());
+        // Play the stream
+        stream.play().unwrap();
 
-    // Create a stream
-    let stream = device.build_input_stream(
-        &config.into(),
-        move |data: &[f32], _: &_| {
-            resample_data(data, &mut resampler, &overflow_buffer_2, &recording_vec, channels);
-        },
-        move |err| {
-            eprintln!("an error occurred on stream: {}", err);
-        },
-        None,
-    ).unwrap();
-
-    // Play the stream
-    stream.play().unwrap();
-
-    // Pause after 10s
-    thread::sleep(Duration::from_secs(3));
-
-    stream.pause().unwrap();
-
-    // Play the audio
-    playback::play_audio(decoded_samples.lock().unwrap().clone(), channels as usize);
-
+        loop {
+            thread::sleep(Duration::from_millis(10));
+        }
+    });
 }
 
 fn resample_data(
     data: &[f32], 
     resampler: &mut FftFixedOut<f64>, 
     overflow_buffer_p: &Arc<Mutex<Vec<f32>>>, 
-    sample_vec: &Arc<Mutex<Vec<f32>>>, 
     channels: u16,
 ) {
 
     // Cut down to needed size and add to overflow buffer
     let mut max_length = resampler.input_frames_next()*channels as usize;
-    println!("data: {}", data.len());
-    println!("max_length: {}", max_length);
+    //println!("data: {}", data.len());
+    //println!("max_length: {}", max_length);
     let mut overflow_buffer = overflow_buffer_p.lock().unwrap();
     overflow_buffer.extend_from_slice(data);
 
@@ -105,20 +93,11 @@ fn resample_data(
         let sample = reverse_extract_channels(&resampled);
 
         // Add all to sample_vec
-        println!("sample: {:?}", sample.len());
-        sample_vec.lock().unwrap().extend_from_slice(&sample);
+        //println!("sample: {:?}", sample.len());
+        encode::pass_to_encode(sample);
 
         // Prepare for next iteration
         max_length = resampler.input_frames_next()*channels as usize;
-
-        /* OLD CODE
-        // Encode with opus
-        let samples = encode::encode(sample, encoder);
-
-        println!("encoded: {:?}", samples.len()); 
-
-        // Decode for testing
-        let decoded_samples = decode::decode(samples, len as usize, decoder); */
     }
 }
 

@@ -1,7 +1,8 @@
+use base64::{engine::general_purpose, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::util;
+use crate::{util, audio};
 
 use super::auth;
 
@@ -21,7 +22,14 @@ pub fn receive_packet(data: &Vec<u8>) -> Result<(), String> {
         Err(_) => return Err("Could not parse event".to_string())
     };
 
-    println!("Received event: {}", event.name);
+    if event.name == "voice" && event.data.is_object() {
+
+        let val = event.data.as_object().expect("Invalid voice packet");
+
+        // Decode voice packet
+        let decoded = general_purpose::STANDARD.decode(String::from(val["data"].as_str().unwrap())).expect("Invalid voice packet");
+        audio::decode::pass_to_decode(decoded);
+    }
 
     return Ok(())
 }
