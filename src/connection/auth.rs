@@ -78,7 +78,7 @@ pub fn refresh_thread(socket: &UdpSocket) {
         match cloned.send(packaged.as_slice()) {
             Ok(_) => {}
             Err(_) => {
-                println!("Could not send"); 
+                util::print_log("Could not send"); 
                 return;
             }
         }

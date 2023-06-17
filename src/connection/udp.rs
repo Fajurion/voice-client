@@ -9,6 +9,7 @@ use rand::Rng;
 
 use crate::audio;
 use crate::connection::receiver;
+use crate::communication;
 use crate::{connection::{auth, self}, util};
 
 static SEND_SENDER: Lazy<Mutex<Sender<Vec<u8>>>> = Lazy::new(|| {
@@ -43,7 +44,7 @@ pub fn connect(address: &str) {
 fn connect_recursive(address: &str, tries: u8) {
 
     if tries > 5 {
-        println!("Could not connect");
+        util::print_log("Could not connect");
         return;
     }
 
@@ -51,7 +52,7 @@ fn connect_recursive(address: &str, tries: u8) {
     let socket = match UdpSocket::bind(format!("localhost:{}", rand::thread_rng().gen_range(3000..4000))) {
         Ok(s) => s,
         Err(_) => {
-            println!("Could not bind socket");
+            util::print_log("Could not bind socket");
             return;
         }
     };
@@ -60,7 +61,7 @@ fn connect_recursive(address: &str, tries: u8) {
     match socket.connect(address) {
         Ok(_) => {}
         Err(_) => {
-            println!("Could not connect");
+            util::print_log("Could not connect to remote address");
             return; 
         }
     }
@@ -76,14 +77,14 @@ fn connect_recursive(address: &str, tries: u8) {
     let mut packet = auth::auth_packet(&input, &input, &input, "test");
 
     // Turn into string and print
-    println!("{}", String::from_utf8_lossy(&packet));
+    util::print_log(format!("{}", String::from_utf8_lossy(&packet)).as_str());
 
     let packaged = connection::prefix_message(auth::get_auth_prefix(), &mut packet);
 
     match socket.send(packaged.as_slice()) {
         Ok(_) => {}
         Err(_) => {
-            println!("Could not send"); 
+            util::print_log("Could not send"); 
             return;
         }
     }
@@ -93,11 +94,11 @@ fn connect_recursive(address: &str, tries: u8) {
     let mut authenticated = false;
     let mut confirm_tries = 0;
 
-    println!("Waiting for confirmation..");
+    util::print_log("Waiting for confirmation..");
 
     while !authenticated {
         if confirm_tries > 5 {
-            println!("Could not authenticate");
+            util::print_log("Could not authenticate");
             return;
         }
 
@@ -108,7 +109,7 @@ fn connect_recursive(address: &str, tries: u8) {
         };
 
         if size == 0 {
-            println!("Could not receive: Retrying..");
+            util::print_log("Could not receive: Retrying..");
             connect_recursive(address, tries + 1);
             return;
         }
@@ -117,7 +118,7 @@ fn connect_recursive(address: &str, tries: u8) {
         let string = String::from_utf8_lossy(&decrypted);
 
         if string == input {
-            println!("Authenticated");
+            util::print_log("Authenticated");
             authenticated = true;
             continue;
         }
@@ -125,7 +126,7 @@ fn connect_recursive(address: &str, tries: u8) {
         match socket.send(&auth::confirm_packet()) {
             Ok(_) => {}
             Err(_) => {
-                println!("Could not send"); 
+                util::print_log("Could not send"); 
                 return;
             }
         }
@@ -143,16 +144,19 @@ fn connect_recursive(address: &str, tries: u8) {
     auth::set_connection(true);
 
     // Listen for udp traffic
-    let mut buf: [u8; 8192] = [0u8; 8192];
-    loop {
+    thread::spawn(move || {
+        let mut buf: [u8; 8192] = [0u8; 8192];
+        loop {
+            let size = socket.recv(&mut buf).expect("Detected disconnect");
 
-        let size = socket.recv(&mut buf).expect("Detected disconnect");
-        match receiver::receive_packet(&buf[0..size].to_vec()) {
-            Ok(_) => (),
-            Err(message) => println!("{}", message)
-        }
-    }    
+            match receiver::receive_packet(&buf[0..size].to_vec()) {
+                Ok(_) => (),
+                Err(message) => util::print_log(format!("{}", message).as_str())
+            }
+        } 
+    });
 
+    communication::start_listening();
 }
 
 // Starts a thread that sends data from the sender channel
@@ -165,7 +169,7 @@ fn send_thread(socket: UdpSocket) {
             match socket.send(&data) {
                 Ok(_) => {}
                 Err(_) => {
-                    println!("Could not send"); 
+                    util::print_log("Could not send"); 
                     return;
                 }
             }

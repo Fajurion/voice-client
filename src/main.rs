@@ -1,5 +1,6 @@
 pub mod connection;
 pub mod audio;
+pub mod communication;
 pub mod util;
 
 static TESTING: bool = true;

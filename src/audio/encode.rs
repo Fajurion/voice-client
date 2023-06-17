@@ -1,6 +1,7 @@
-use std::{thread, sync::{Mutex, mpsc::{Sender, Receiver, self}}};
+use std::{thread, sync::{Mutex, mpsc::{Sender, Receiver, self}}, collections::HashMap, cmp};
 
 use once_cell::sync::Lazy;
+use crate::{audio, util, communication::{self, Event}};
 
 use crate::{connection::{self, auth}};
 
@@ -54,6 +55,8 @@ pub fn encode_thread(channels: usize) {
         // Create encoder
         let mut encoder = opus::Encoder::new(SAMPLE_RATE, opus_channel, opus::Application::Voip).unwrap();
 
+        let mut talking_streak = 0;
+
         // Set the bitrate to 128 kb/s
         encoder.set_bitrate(opus::Bitrate::Bits(128000)).unwrap();
 
@@ -65,17 +68,48 @@ pub fn encode_thread(channels: usize) {
                 continue;
             }
 
-            // TODO: Check if talking
+            let mut options = audio::AUDIO_OPTIONS.lock().unwrap();
 
-            if auth::get_connection() {
+            let mut max = 0.0;
+            for sample in samples.iter() {
+                if *sample > max {
+                    max = *sample;
+                }
+            }
+
+            if options.amplitude_logging {
+                util::print_log(&format!("max:{}", max));
+            }
+
+            if max > options.talking_amplitude {
+                talking_streak = 10;
+
+                if !options.talking {
+                    util::print_action(Event{
+                        action: "started_talking".to_string(),
+                        data: HashMap::new()
+                    });
+                }
+                options.talking = true;
+            } else if talking_streak <= 0 {
+
+                if options.talking {
+                    util::print_action(Event{
+                        action: "stopped_talking".to_string(),
+                        data: HashMap::new()
+                    });
+                }
+                options.talking = false;
+            } else {
+                talking_streak -= 1;
+            }
+
+            if auth::get_connection() && !options.muted && !options.silent_mute && options.talking {
                 let mut encoded = encode(samples, &mut encoder);
                 let mut channel = vec![b'v', b':'];
                 channel.append(&mut encoded);    
                 connection::udp::send(auth::encrypted_packet(&mut channel));
             }
-
-            // Decode (FUTURE)
-            //let decoded = decode::decode(encoded, FRAME_SIZE * channels, &mut decoder);
         }
     });
 }

@@ -3,7 +3,7 @@ use std::{sync::{Mutex, Arc}, thread, time::Duration};
 use cpal::{traits::{HostTrait, DeviceTrait, StreamTrait}, StreamConfig};
 use rubato::{FftFixedOut, Resampler};
 
-use crate::audio::{encode};
+use crate::{audio::{encode}, util};
 
 pub fn record() {
     
@@ -47,7 +47,7 @@ pub fn record() {
                 resample_data(data, &mut resampler, &overflow_buffer_2, channels);
             },
             move |err| {
-                eprintln!("an error occurred on stream: {}", err);
+                util::print_log(format!("an error occurred on stream: {}", err).as_str());
             },
             None,
         ).unwrap();
@@ -70,8 +70,8 @@ fn resample_data(
 
     // Cut down to needed size and add to overflow buffer
     let mut max_length = resampler.input_frames_next()*channels as usize;
-    //println!("data: {}", data.len());
-    //println!("max_length: {}", max_length);
+    //util::print_log(format!("data: {}", data.len());
+    //util::print_log(format!("max_length: {}", max_length);
     let mut overflow_buffer = overflow_buffer_p.lock().unwrap();
     overflow_buffer.extend_from_slice(data);
 
@@ -93,7 +93,7 @@ fn resample_data(
         let sample = reverse_extract_channels(&resampled);
 
         // Add all to sample_vec
-        //println!("sample: {:?}", sample.len());
+        //util::print_log(format!("sample: {:?}", sample.len());
         encode::pass_to_encode(sample);
 
         // Prepare for next iteration
