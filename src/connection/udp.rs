@@ -49,7 +49,7 @@ fn connect_recursive(address: &str, tries: u8) {
     }
 
     // Bind to a local address
-    let socket = match UdpSocket::bind(format!("localhost:{}", rand::thread_rng().gen_range(3000..4000))) {
+    let socket = match UdpSocket::bind(format!("0.0.0.0:{}", rand::thread_rng().gen_range(3000..4000))) {
         Ok(s) => s,
         Err(_) => {
             util::print_log("Could not bind socket");

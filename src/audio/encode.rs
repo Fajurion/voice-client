@@ -1,13 +1,15 @@
-use std::{thread, sync::{Mutex, mpsc::{Sender, Receiver, self}}, collections::HashMap, cmp};
+use std::{thread, sync::{Mutex, mpsc::{Sender, Receiver, self}}, collections::HashMap};
 
 use once_cell::sync::Lazy;
-use crate::{audio, util, communication::{self, Event}};
+use crate::{audio, util, communication::{Event}};
 
-use crate::{connection::{self, auth}};
+use crate::{connection::{auth}};
+
+use super::decode;
 
 pub const SAMPLE_RATE: u32 = 48000;
 pub const FRAME_SIZE: usize = 960;
- 
+
 pub fn encode(samples: Vec<f32>, encoder: &mut opus::Encoder) -> Vec<u8> {
 
     let mut output: Vec<u8> = vec![0u8; 3000];
@@ -105,10 +107,14 @@ pub fn encode_thread(channels: usize) {
             }
 
             if auth::get_connection() && !options.muted && !options.silent_mute && options.talking {
-                let mut encoded = encode(samples, &mut encoder);
+                let encoded = encode(samples, &mut encoder);
+
+                decode::pass_to_decode(encoded);
+
+                /*
                 let mut channel = vec![b'v', b':'];
                 channel.append(&mut encoded);    
-                connection::udp::send(auth::encrypted_packet(&mut channel));
+                connection::udp::send(auth::encrypted_packet(&mut channel)); */
             }
         }
     });

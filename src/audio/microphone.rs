@@ -15,15 +15,16 @@ pub fn record() {
 
         // Create a stream config
         let default_config = device.default_input_config().expect("no stream config found");
-        let sample_rate = default_config.sample_rate().0;
+        util::print_log(format!("default config: {:?}", default_config).as_str());
+        let sample_rate: u32 = default_config.sample_rate().0;
         let channels = 1; // Stereo doesn't work at the moment (will fix in the future or never)
 
-        // Create custom config with better buffer size
-        let config = StreamConfig {
-            channels: channels,
+        let config: StreamConfig = StreamConfig {
+            channels: default_config.channels(),
             sample_rate: cpal::SampleRate(sample_rate),
             buffer_size: cpal::BufferSize::Fixed(4096),
         };
+
         // Create a resampler
         let mut resampler = FftFixedOut::<f64>::new(
             sample_rate as usize,
@@ -41,7 +42,7 @@ pub fn record() {
         encode::encode_thread((channels as usize).clone());
 
         // Create a stream
-        let stream = device.build_input_stream(
+        let stream = match device.build_input_stream(
             &config.into(),
             move |data: &[f32], _: &_| {
                 resample_data(data, &mut resampler, &overflow_buffer_2, channels);
@@ -50,7 +51,13 @@ pub fn record() {
                 util::print_log(format!("an error occurred on stream: {}", err).as_str());
             },
             None,
-        ).unwrap();
+        ) {
+            Ok(stream) => stream,
+            Err(err) => {
+                util::print_log(format!("an error occurred on stream: {}", err).as_str());
+                return;
+            }
+        };
 
         // Play the stream
         stream.play().unwrap();
@@ -61,6 +68,18 @@ pub fn record() {
     });
 }
 
+// From copilot chat
+fn stereo_to_mono(pcm: &[f32]) -> Vec<f32> {
+    let mut mono = Vec::with_capacity(pcm.len() / 2);
+    for i in (0..pcm.len()).step_by(2) {
+        let left = pcm[i];
+        let right = pcm[i + 1];
+        let avg = (left + right) / 2.0;
+        mono.push(avg);
+    }
+    mono
+}
+
 fn resample_data(
     data: &[f32], 
     resampler: &mut FftFixedOut<f64>, 
@@ -68,12 +87,17 @@ fn resample_data(
     channels: u16,
 ) {
 
-    // Cut down to needed size and add to overflow buffer
-    let mut max_length = resampler.input_frames_next()*channels as usize;
+    // Cut down to needed size and add to overflow buffer (MONO ONLY)
+    let mut max_length = resampler.input_frames_next();
     //util::print_log(format!("data: {}", data.len());
     //util::print_log(format!("max_length: {}", max_length);
     let mut overflow_buffer = overflow_buffer_p.lock().unwrap();
-    overflow_buffer.extend_from_slice(data);
+
+    if channels == 2 {
+        overflow_buffer.extend_from_slice(&stereo_to_mono(data));
+    } else {
+        overflow_buffer.extend_from_slice(data);
+    }
 
     while overflow_buffer.len() > max_length {
 
@@ -86,11 +110,12 @@ fn resample_data(
         };
         
         // Extract channels
-        let extracted_channels = extract_channels(&buffer, channels as usize);
+        let mut extracted_channels: Vec<Vec<f64>> = vec![Vec::<f64>::with_capacity(buffer.len()); 1];
+        extracted_channels[0] = buffer.iter().map(|&x| x as f64).collect::<Vec<f64>>();
 
         // Resample and reverse extract
         let resampled = resampler.process(&extracted_channels, None).unwrap();
-        let sample = reverse_extract_channels(&resampled);
+        let sample = resampled[0].iter().map(|&x| x as f32).collect::<Vec<f32>>();
 
         // Add all to sample_vec
         //util::print_log(format!("sample: {:?}", sample.len());
@@ -101,6 +126,7 @@ fn resample_data(
     }
 }
 
+/* IN CASE WE EVER NEED STEREO AGAIN
 fn extract_channels(data: &[f32], channels: usize) -> Vec<Vec<f64>> {
 
     let mut channels_data = vec![Vec::<f64>::with_capacity(data.len() / channels); channels];
@@ -111,9 +137,9 @@ fn extract_channels(data: &[f32], channels: usize) -> Vec<Vec<f64>> {
         }
     }
     channels_data
-}
+} */
 
-// Thanks ChatGPT
+/* IN CASE WE EVER NEED STEREO AGAIN
 fn reverse_extract_channels(channels_data: &[Vec<f64>]) -> Vec<f32> {
     let channel_size = channels_data.len();
     let num_samples = channels_data[0].len();
@@ -124,5 +150,5 @@ fn reverse_extract_channels(channels_data: &[Vec<f64>]) -> Vec<f32> {
         }
     }
     interleaved_samples
-}
+} */
 
