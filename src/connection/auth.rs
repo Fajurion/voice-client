@@ -4,7 +4,7 @@ use std::{net::UdpSocket, thread, time::Duration};
 use base64::{engine::general_purpose, Engine};
 use once_cell::sync::Lazy;
 
-use crate::{util, main};
+use crate::{util};
 
 use super::PrefixKind;
 
