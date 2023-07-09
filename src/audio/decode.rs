@@ -3,7 +3,7 @@ use std::{thread, sync::{Mutex, mpsc::{Sender, self, Receiver}}};
 use once_cell::sync::Lazy;
 use rodio::{Sink, OutputStream, buffer::SamplesBuffer};
 
-use crate::audio;
+use crate::{audio, util};
 
 use super::{encode};
 
@@ -54,6 +54,8 @@ pub fn decode_play_thread() {
         loop {
             let data = RECEIVE_RECEIVER.lock().unwrap().recv().expect("Decoding channel broke");
             let decoded = decode(data, audio::encode::FRAME_SIZE, &mut decoder);
+
+            util::print_log("Decoded audio");
 
             sink.append(SamplesBuffer::new(1, encode::SAMPLE_RATE as u32, decoded));
         }

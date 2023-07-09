@@ -17,7 +17,7 @@ pub struct AudioOptions {
 pub static AUDIO_OPTIONS: Lazy<Mutex<AudioOptions>> = Lazy::new(|| {
     Mutex::new(AudioOptions {
         silent_mute: false,
-        muted: true,
+        muted: false,
         deafened: false,
         amplitude_logging: false,
         talking: false,

@@ -7,7 +7,6 @@ use std::net::UdpSocket;
 use once_cell::sync::Lazy;
 use rand::Rng;
 
-use crate::audio;
 use crate::connection::receiver;
 use crate::communication;
 use crate::{connection::{auth, self}, util};
@@ -139,7 +138,7 @@ fn connect_recursive(address: &str, tries: u8) {
     // Start threads
     auth::refresh_thread(&socket);
     send_thread(socket.try_clone().expect("Could not clone socket"));
-    audio::decode::decode_play_thread();
+    //audio::decode::decode_play_thread();
 
     auth::set_connection(true);
 

@@ -109,6 +109,7 @@ pub fn encode_thread(channels: usize) {
             if auth::get_connection() && !options.muted && !options.silent_mute && options.talking {
                 let encoded = encode(samples, &mut encoder);
 
+                util::print_log("sending audio");
                 decode::pass_to_decode(encoded);
 
                 /*

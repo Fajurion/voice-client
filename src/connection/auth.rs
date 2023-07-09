@@ -4,11 +4,11 @@ use std::{net::UdpSocket, thread, time::Duration};
 use base64::{engine::general_purpose, Engine};
 use once_cell::sync::Lazy;
 
-use crate::util;
+use crate::{util, main};
 
 use super::PrefixKind;
 
-static CONNECTION: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
+static CONNECTION: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(true));
 static ENCRYPTION_KEY: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![])); 
 
 pub fn set_encryption_key(key: Vec<u8>) {
@@ -36,9 +36,7 @@ pub fn encrypted_packet(data: &mut Vec<u8>) -> Vec<u8> {
     // Encrypt data
     let mut encrypted = util::crypto::encrypt(&get_encryption_key(), data);
 
-    let mut prefix: Vec<u8> = vec![get_prefix().byte(), b':'];
-    prefix.append(&mut encrypted);
-    prefix
+    super::prefix_message(PrefixKind::Encrypted, &mut encrypted)
 }
 
 pub fn auth_packet(id: &str, token: &str, secret: &str, room: &str) -> Vec<u8> {
@@ -74,7 +72,7 @@ pub fn refresh_thread(socket: &UdpSocket) {
         thread::sleep(Duration::from_secs(20));
     
         let packaged = encrypted_packet(&mut vec![b'r', b':', b'r']);
-    
+
         match cloned.send(packaged.as_slice()) {
             Ok(_) => {}
             Err(_) => {

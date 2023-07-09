@@ -17,10 +17,11 @@ pub fn record() {
         let default_config = device.default_input_config().expect("no stream config found");
         util::print_log(format!("default config: {:?}", default_config).as_str());
         let sample_rate: u32 = default_config.sample_rate().0;
-        let channels = 1; // Stereo doesn't work at the moment (will fix in the future or never)
-
+        let work_channels = 1; // Stereo doesn't work at the moment (will fix in the future or never)
+        let mic_channels = default_config.channels();
+    
         let config: StreamConfig = StreamConfig {
-            channels: default_config.channels(),
+            channels: mic_channels,
             sample_rate: cpal::SampleRate(sample_rate),
             buffer_size: cpal::BufferSize::Fixed(4096),
         };
@@ -31,7 +32,7 @@ pub fn record() {
             encode::SAMPLE_RATE as usize,
             encode::FRAME_SIZE,
             encode::FRAME_SIZE,
-            channels as usize,
+            work_channels as usize,
         ).unwrap();
 
         // Create buffer for overflowing samplesd
@@ -39,13 +40,13 @@ pub fn record() {
         let overflow_buffer_2: Arc<Mutex<Vec<f32>>> = overflow_buffer.clone();
 
         // Start encoding: Arc<Mutex<Vec<f32>>> thread
-        encode::encode_thread((channels as usize).clone());
+        encode::encode_thread((work_channels as usize).clone());
 
         // Create a stream
         let stream = match device.build_input_stream(
             &config.into(),
             move |data: &[f32], _: &_| {
-                resample_data(data, &mut resampler, &overflow_buffer_2, channels);
+                resample_data(data, &mut resampler, &overflow_buffer_2, mic_channels);
             },
             move |err| {
                 util::print_log(format!("an error occurred on stream: {}", err).as_str());
@@ -74,8 +75,7 @@ fn stereo_to_mono(pcm: &[f32]) -> Vec<f32> {
     for i in (0..pcm.len()).step_by(2) {
         let left = pcm[i];
         let right = pcm[i + 1];
-        let avg = (left + right) / 2.0;
-        mono.push(avg);
+        mono.push((left + right) * 0.5)
     }
     mono
 }
@@ -89,8 +89,6 @@ fn resample_data(
 
     // Cut down to needed size and add to overflow buffer (MONO ONLY)
     let mut max_length = resampler.input_frames_next();
-    //util::print_log(format!("data: {}", data.len());
-    //util::print_log(format!("max_length: {}", max_length);
     let mut overflow_buffer = overflow_buffer_p.lock().unwrap();
 
     if channels == 2 {
